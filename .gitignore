@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.env
+*.pyc
+.ipynb_checkpoints/
+# keep evaluation/labels/*.csv : your hand labels are evidence, commit them
+
+sample_repo/

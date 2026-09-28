@@ -1,0 +1,36 @@
+﻿services:
+  graph-service:
+    build:
+      context: .
+      dockerfile: services/graph_service/Dockerfile
+    ports:
+      - "50051:50051"
+    volumes:
+      - ${REPO_PATH_ON_YOUR_COMPUTER}:/repo:ro
+
+  qa-service:
+    build:
+      context: .
+      dockerfile: services/qa_service/Dockerfile
+    ports:
+      - "50052:50052"
+    environment:
+      - GRAPH_SERVICE_ADDR=graph-service:50051
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ${REPO_PATH_ON_YOUR_COMPUTER}:/repo:ro
+    depends_on:
+      - graph-service
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - GRAPH_SERVICE_ADDR=graph-service:50051
+      - QA_SERVICE_ADDR=qa-service:50052
+    depends_on:
+      - graph-service
+      - qa-service

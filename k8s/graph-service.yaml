@@ -1,0 +1,31 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: graph-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: graph-service
+  template:
+    metadata:
+      labels:
+        app: graph-service
+    spec:
+      containers:
+        - name: graph-service
+          image: codemapper_v2-graph-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 50051
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: graph-service
+spec:
+  selector:
+    app: graph-service
+  ports:
+    - port: 50051
+      targetPort: 50051

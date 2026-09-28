@@ -1,0 +1,18 @@
+﻿syntax = "proto3";
+
+package qaservice;
+
+service QAService {
+  rpc Ask (AskRequest) returns (AskResponse);
+}
+
+message AskRequest {
+  string repo_path = 1;
+  string function_id = 2;
+  string question = 3;
+  string model = 4;
+}
+
+message AskResponse {
+  string answer = 1;
+}

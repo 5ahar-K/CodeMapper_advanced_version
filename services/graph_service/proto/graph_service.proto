@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package graphservice;
+
+service GraphService {
+  rpc BuildGraph (BuildGraphRequest) returns (BuildGraphResponse);
+  rpc GetCallers (CallersRequest) returns (CallersResponse);
+  rpc GetBlastRadius (BlastRadiusRequest) returns (BlastRadiusResponse);
+}
+
+message BuildGraphRequest {
+  string repo_path = 1;
+}
+
+message BuildGraphResponse {
+  string graph_id = 1;
+  int32 function_count = 2;
+}
+
+message CallersRequest {
+  string graph_id = 1;
+  string function_id = 2;
+}
+
+message CallersResponse {
+  repeated string caller_ids = 1;
+}
+
+message BlastRadiusRequest {
+  string graph_id = 1;
+  string function_id = 2;
+}
+
+message BlastRadiusResponse {
+  int32 score = 1;
+}
