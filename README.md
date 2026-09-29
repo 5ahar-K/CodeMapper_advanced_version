@@ -1,80 +1,119 @@
 # Code-Mapper
 
-A static call graph for Python repositories in which **every edge carries an honest confidence label**, plus a small harness that
-*measures* how right the graph is and how an LLM behaves when it is given the graph as context.
+A static call-graph tool for Python repositories, split into three microservices (gRPC internally, REST at the edge), containerized with Docker, and deployable to Kubernetes.
 
-```
-python -m codemapper stats   REPO                   # coverage: files, call sites, confidence breakdown, parse problems
-python -m codemapper top     REPO -n 10             # highest "blast radius" functions (production code only)
-python -m codemapper callers REPO Class.method      # who calls this?
-python -m codemapper ask     REPO Class.method "what breaks if this raises?" --model <pinned-model>   # needs GEMINI_API_KEY
-pytest                                              # 28 tests
-```
+Every edge in the call graph carries an honest confidence label instead of a guess. This repo also contains the evaluation harness used to measure that honesty against hand-labelled ground truth.
 
-## How it works (five stages, one file each)
+## Results
 
-| stage | file | job |
-|---|---|---|
-| 1 parse | `codemapper/parse.py` | one file -> functions, classes, imports, call sites (keeps the *receiver*: `self.save()` is not `save()`) |
-| 2 index | `codemapper/index.py` | whole repo: module/import resolution, re-exports, star imports, class hierarchy, parse errors |
-| 3 resolve | `codemapper/resolve.py` | each call -> target(s) + **confidence** + human-readable reason |
-| 4 graph | `codemapper/graph.py` | networkx graphs, blast radius, data-flow graph (kept separate: different edge meaning) |
-| 5 llm | `codemapper/llm.py` | prompt building + model client; the only file that talks to a model |
+Measured at tag `v1-scored` (https://github.com/5ahar-K/CodeMapper_advanced_version/releases/tag/v1-scored), on 100 randomly sampled, manually verified call sites in [pallets/click](https://github.com/pallets/click).
 
-Confidence tiers: **high** (scope/import/class-hierarchy proof) > **medium** (type inferred from `x = Foo()`) >
-**low** (name-only guess: unknown receiver, exactly one repo method with that name) > **ambiguous** (several candidates; listed, never picked)
-> external / unresolved (no edge). `trusted(G, min_conf)` returns the graph at a chosen threshold.
-`baseline.py` is the original name-matching heuristic, frozen so before/after comparisons are fair.
-
-## Results  <- fill these in from YOUR labels; do not publish numbers you did not measure
-
-Repo: `______` at commit `______`. Labelled call sites: `___` (random sample, seed `__`, blind labelling; `___` marked "?").
-
-| method | precision (95% CI) | recall (95% CI) | abstains | n |
-|---|---|---|---|---|
-| baseline (original heuristic) | | | | |
-| new: high only | | | | |
-| new: high + medium | | | | |
-| new: high + medium + low | | | | |
-| new: everything incl. ambiguous | | | | |
-
-Error analysis (3-5 bullets, in your own words: what kinds of call does the resolver still get wrong, and why?):
-
-LLM behaviour (`evaluation/llm_eval.py`, model `______`, temperature 0, n=`__`):
-
-| question type / condition | accuracy or F1 | abstain rate | invented items per answer |
+| method | precision | recall | abstains |
 |---|---|---|---|
-| callers / code_only | | | |
-| callers / with_graph | | | |
-| calls (yes/no) / code_only | | | |
-| calls (yes/no) / with_graph | | | |
-| unanswerable / with_graph | | | |
+| baseline (original name-matching heuristic) | 0.43 (0.30-0.60) | 0.76 (0.61-0.90) | 16% |
+| new resolver: high confidence only | 1.00 | 0.66 (0.53-0.80) | 39% |
+| new resolver: high + medium | 1.00 | 0.67 (0.54-0.81) | 38% |
+| **new resolver: high + medium + low (default)** | **1.00** | **0.77 (0.63-0.91)** | 29% |
+| new resolver: everything incl. ambiguous | 0.72 (0.59-0.87) | 0.95 (0.89-0.99) | 16% |
 
-## Reproducing the labelling
+Ranges are 95% bootstrap intervals over the 100 sampled call sites.
+
+The "baseline" heuristic above is the original name-matching approach from an earlier version of this tool: https://github.com/5ahar-K/CodeGraph-agent. `baseline.py` in this repo is a frozen, faithful copy of that logic, kept only so the two can be compared fairly on the same ground truth.
+
+**Reading it:** the original heuristic was wrong more often than right (0.43 precision) because it linked calls by name alone, regardless of the object making the call. The new resolver produced zero incorrect links on this sample at a comparable recall to the baseline (0.76 vs 0.77), by using scope, imports and class hierarchy before falling back to a name-only guess.
+
+**Labelling method:** rows 1-35 labelled by hand, reading the source at each call site. Rows 36-100 labelled with AI assistance and spot-checked by hand. Ground-truth rules used:
+- `self.method()` resolved through the enclosing class's hierarchy; overrides in subclasses are not counted as separate true targets.
+- `super().method()` the first parent (left to right, for multiple inheritance) that defines the method.
+- Calls on built-in types (`list`, `dict`, `str`, file objects) are labelled as external, even if a same-named method exists elsewhere in the repo.
+- Where the receiver's exact type is only known at runtime (e.g. a class chosen from user input), all statically possible targets are labelled as true.
+
+A bug in the scoring script itself (chained calls like `a.b().c()` were occasionally scored against the wrong sub-call) was found and fixed during this process; the table above reflects the corrected scorer.
+
+**Two small resolver fixes** (generic base classes written as `class X(Base[int])`, and nested functions defined once per branch of an `if`/`elif`/`else`) were made *after* the commit above was scored. They are correct, see `apply_fix.py` and their accompanying tests in `tests/test_codemapper.py`, but have not yet been re-measured on a fresh sample, so no new numbers are claimed for them.
+
+## Known limits
+
+- Type hints and `typing.cast(...)` are not used to infer a receiver's type.
+- An attribute's type (e.g. `self.type` set to different classes depending on configuration) is not tracked; such calls resolve as ambiguous.
+- Where a class is chosen entirely at runtime (e.g. from a command-line argument), the resolver lists every statically possible target rather than picking one.
+- Class hierarchy uses breadth-first traversal, not exact Python C3 MRO.
+- Dynamic dispatch (plugin registries, `getattr`) is invisible to static analysis by construction.
+
+## Architecture
+
+```mermaid
+graph TD
+    A[Browser: REST/JSON] --> B[gateway: FastAPI]
+    B -- gRPC --> C[graph-service]
+    B -- gRPC --> D[qa-service]
+    D -- gRPC --> C
+    D -- HTTPS --> E[Gemini API]
+```
+
+- **graph-service** wraps `codemapper`'s `Index`/`Resolver`/graph code behind a gRPC interface (`BuildGraph`, `GetCallers`, `GetBlastRadius`).
+- **qa-service** is both a gRPC server (answers `Ask` requests) and a gRPC client (calls graph-service for context before asking the LLM). Demonstrates service-to-service communication, not just client-to-service.
+- **gateway** is the only service exposed outside the cluster. Translates REST/JSON requests into gRPC calls to the other two. Everything else is only reachable from inside the network.
+
+Each service is defined by a `.proto` contract (`services/*/proto/`), compiled to Python stubs, and packaged in its own Docker image.
+
+## Running it
+
+### Locally (no Docker)
 
 ```
-git -C target_repo checkout <commit>                                   # pin the repo: the sample depends on it
-python -m evaluation.sample_calls target_repo --n 100 --seed 0 --out evaluation/labels/labels.csv
-# label every row BY HAND, reading the code, without running the tool (instructions: docstring of sample_calls.py)
-python -m evaluation.score target_repo evaluation/labels/labels.csv --show-errors "new: high + medium + low"
+pip install -r requirements.txt
+python -m pytest
+python -m codemapper stats path/to/repo
+python -m codemapper top path/to/repo -n 10
 ```
 
-## Known limits (state these before an interviewer finds them)
+### As three services (Docker Compose)
 
-* **Static analysis cannot see dynamic dispatch**: plugin registries, `getattr`, decorators that register callbacks.
-  Example: Mailpile's `Command.command()` methods are invoked by a framework, so they show ~0 callers.
-* **Receiver types are only inferred locally** (`x = Foo()`), not through attributes (`self.ui = UI()`) or return values.
-  This is the main source of `ambiguous`/`low` edges; calls like `x.get()`/`.append()` on unknown `x` stay ambiguous.
-* **Class hierarchy uses breadth-first order, not exact C3 MRO**; overrides in subclasses are not considered.
-* **Old Python is repaired, not fully parsed**: `except X, e:` and `async` as a name are fixed; other unparseable
-  lines are replaced by `pass`. Every repair is listed in `stats` (`files_repaired`).
-* Precision/recall are measured on a **sample of call sites whose name matches some repo function**; calls the parser cannot even
-  see (dynamic) are outside that universe.
-* Python only, one repo at a time, no incremental updates.
+```
+git clone --depth 1 https://github.com/pallets/click.git sample_repo
+$env:REPO_PATH_ON_YOUR_COMPUTER = "$(pwd)\sample_repo"
+$env:GEMINI_API_KEY = "your-key"
+docker compose up --build
+```
 
-## Development-time observations (structure, not accuracy)
+Then open http://localhost:8000/docs.
 
-Measured while building, on Mailpile `741e610` and click `6aabf09`:
-Mailpile has 8 files that do not parse as modern Python (incl. `util.py`, star-imported by 49 modules, and `commands.py`,
-which defines the `Command` base class of ~85 classes). With repair on, all 8 parse (9 lines dropped in total);
-high-confidence call sites rose from 4,071 to 5,065 and unresolved fell from 493 to 301.
+### On Kubernetes (minikube)
+
+```
+minikube start --driver=docker --container-runtime=docker
+minikube docker-env | Invoke-Expression
+git clone --depth 1 https://github.com/pallets/click.git sample_repo
+docker compose build
+kubectl create secret generic gemini-api-key --from-literal=api-key="your-key"
+kubectl apply -f k8s/
+kubectl get pods
+minikube service gateway --url
+```
+
+Open the printed URL followed by `/docs`. Note: the Kubernetes images bake `sample_repo/` into the container at build time (`/app/sample_repo`) rather than mounting it live, to avoid the added complexity of sharing a host folder into minikube's own VM.
+
+## Reproducing the evaluation
+
+```
+python -m evaluation.sample_calls path/to/repo --n 100 --seed 0 --out labels.csv
+python -m evaluation.score path/to/repo labels.csv --show-errors "new: high + medium + low"
+```
+
+Label `true_labels` by hand between those two commands, reading the source at each call site.
+
+## Project structure
+
+```
+codemapper/     the analysis engine: parsing, cross-file resolution, confidence-tiered
+                call resolution, graph construction, LLM prompt building
+evaluation/     the measurement harness: sampling, scoring, LLM-behaviour evaluation
+services/       the three microservices (graph-service, qa-service, gateway) with
+                their .proto contracts, generated gRPC code, and Dockerfiles
+k8s/            Kubernetes manifests (Deployment + Service per microservice, Secret
+                for the Gemini API key)
+tests/          unit tests for the resolver, plus a hand-built "toy repo" fixture
+                with known-by-hand correct answers for every resolution rule
+apply_fix.py    a kept record of two post-evaluation bug fixes (see Results, above)
+```
