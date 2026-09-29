@@ -90,6 +90,13 @@ _LITERALS = (ast.Constant, ast.JoinedStr, ast.List, ast.Dict, ast.Set, ast.Tuple
              ast.ListComp, ast.DictComp, ast.SetComp, ast.GeneratorExp)
 
 
+def _base_name(node) -> str | None:
+    # Name of a base class. ParamType[int] (a generic base) counts as ParamType.
+    if isinstance(node, ast.Subscript):
+        node = node.value
+    return _dotted(node)
+
+
 def _receiver(node) -> str:
     d = _dotted(node)
     if d:
@@ -224,7 +231,7 @@ class _Collector:
     def _class(self, node: ast.ClassDef, qual: str):
         qn = f"{qual}.{node.name}" if qual else node.name
         info = ClassInfo(id=self._unique_id(qn, node.lineno), name=node.name, qualname=qn, file=self.file,
-                         bases=[d for d in (_dotted(b) for b in node.bases) if d])
+                         bases=[d for d in (_base_name(b) for b in node.bases) if d])
         self.classes.append(info)
         if not qual:
             self.mod.classes.setdefault(node.name, info)

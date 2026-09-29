@@ -172,3 +172,29 @@ def test_dataflow_edges_follow_variables_through_a_pipeline(ix, res):
     assert D.has_edge("pipeline.py::fetch", "pipeline.py::clean")
     assert D.has_edge("pipeline.py::clean", "pipeline.py::save_it")
     assert not D.has_edge("pipeline.py::fetch", "pipeline.py::save_it")
+
+
+# ---------------------------------------------------------------- fixes found by error analysis
+def _one_file_repo(tmp_path, source):
+    (tmp_path / "m.py").write_text(source)
+    ix = Index.build(tmp_path)
+    return ix, Resolver(ix)
+
+
+def test_generic_base_classes_are_followed(tmp_path):
+    ix, res = _one_file_repo(tmp_path, (
+        "class Base:\n    def hello(self):\n        pass\n\n\n"
+        "class Child(Base[int]):\n    def go(self):\n        self.hello()\n        super().hello()\n"))
+    fn = ix.functions["m.py::Child.go"]
+    for text in ("self.hello", "super().hello"):
+        r = res.resolve(fn, next(c for c in fn.calls if c.text == text))
+        assert r.targets == ("m.py::Base.hello",) and r.confidence == "high", (text, r)
+
+
+def test_nested_function_defined_in_several_branches_returns_every_definition(tmp_path):
+    ix, res = _one_file_repo(tmp_path, (
+        "def outer(x):\n    if x:\n        def conv(v):\n            return 1\n"
+        "    else:\n        def conv(v):\n            return 2\n    return conv(x)\n"))
+    fn = ix.functions["m.py::outer"]
+    r = res.resolve(fn, next(c for c in fn.calls if c.text == "conv"))
+    assert len(r.targets) == 2 and r.confidence == "medium"

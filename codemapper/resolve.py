@@ -64,9 +64,11 @@ class Resolver:
         mod = ix.modules[fn.file]
 
         for scope in _scopes(fn.qualname):                       # 1. a function defined inside an enclosing function
-            for fid in mod.by_qualname.get(f"{scope}.{name}", []):
-                if not ix.functions[fid].is_method:
-                    return Resolution((fid,), "high", "nested function in enclosing scope")
+            nested = [fid for fid in mod.by_qualname.get(f"{scope}.{name}", []) if not ix.functions[fid].is_method]
+            if len(nested) == 1:
+                return Resolution((nested[0],), "high", "nested function in enclosing scope")
+            if nested:                                           # e.g. one definition per if/elif/else branch
+                return Resolution(tuple(nested), "medium", f"nested function defined {len(nested)} times (branches)")
 
         if name in fn.locals:                                    # 2. a variable or parameter shadows everything else
             return Resolution((), "unresolved", "call of a local variable or parameter")
