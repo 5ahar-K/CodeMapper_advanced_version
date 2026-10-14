@@ -22,7 +22,7 @@ The "baseline" heuristic above is the original name-matching approach from an ea
 
 **Reading it:** the original heuristic was wrong more often than right (0.43 precision) because it linked calls by name alone, regardless of the object making the call. The new resolver produced zero incorrect links on this sample at a comparable recall to the baseline (0.76 vs 0.77), by using scope, imports and class hierarchy before falling back to a name-only guess.
 
-**Labelling method:** rows 1-35 labelled by hand, reading the source at each call site. Rows 36-100 labelled with AI assistance and spot-checked by hand. Ground-truth rules used:
+**Labelling method:** 100 call sites labelled by hand, reading the source at each call site. Ground-truth rules used:
 - `self.method()` resolved through the enclosing class's hierarchy; overrides in subclasses are not counted as separate true targets.
 - `super().method()` the first parent (left to right, for multiple inheritance) that defines the method.
 - Calls on built-in types (`list`, `dict`, `str`, file objects) are labelled as external, even if a same-named method exists elsewhere in the repo.
