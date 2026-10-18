@@ -94,6 +94,18 @@ minikube service gateway --url
 
 Open the printed URL followed by `/docs`. Note: the Kubernetes images bake `sample_repo/` into the container at build time (`/app/sample_repo`) rather than mounting it live, to avoid the added complexity of sharing a host folder into minikube's own VM.
 
+### On AWS (EC2 + Terraform)
+
+The same Docker Compose stack runs on a single EC2 instance. Terraform (`terraform/`) creates the
+instance, a security group limited to one IP, and the SSH key pair. Full steps, design decisions and
+a production wishlist are in [docs/deployment.md](docs/deployment.md).
+
+```
+cd terraform
+terraform init
+terraform apply
+```
+
 ## Reproducing the evaluation
 
 ```
@@ -113,6 +125,8 @@ services/       the three microservices (graph-service, qa-service, gateway) wit
                 their .proto contracts, generated gRPC code, and Dockerfiles
 k8s/            Kubernetes manifests (Deployment + Service per microservice, Secret
                 for the Gemini API key)
+terraform/      AWS infrastructure as code (EC2 instance, security group, key pair)
+docs/           deployment guide for AWS
 tests/          unit tests for the resolver, plus a hand-built "toy repo" fixture
                 with known-by-hand correct answers for every resolution rule
 apply_fix.py    a kept record of two post-evaluation bug fixes (see Results, above)
