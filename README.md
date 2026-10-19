@@ -1,5 +1,7 @@
 # Code-Mapper
 
+[![CI](https://github.com/5ahar-K/CodeMapper_advanced_version/actions/workflows/ci.yml/badge.svg)](https://github.com/5ahar-K/CodeMapper_advanced_version/actions/workflows/ci.yml)
+
 A static call-graph tool for Python repositories, split into three microservices (gRPC internally, REST at the edge), containerized with Docker, and deployable to Kubernetes.
 
 Every edge in the call graph carries an honest confidence label instead of a guess. This repo also contains the evaluation harness used to measure that honesty against hand-labelled ground truth.
