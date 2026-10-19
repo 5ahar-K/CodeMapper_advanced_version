@@ -37,8 +37,9 @@ Terraform creates three resources:
   files and `*.pem` are in `.gitignore`.
 - **Short-lived credentials.** AWS access uses `aws login` (browser sign-in, temporary credentials)
   rather than long-lived access keys.
-- **Everything is reproducible.** `terraform destroy` removes the whole environment, so nothing keeps
-  consuming free-plan credit when it is not in use.
+- **The infrastructure is reproducible.** `terraform apply` and `terraform destroy` create and remove
+  the instance, firewall and key pair. Installing and configuring the app on the server is still a
+  manual step (see "Known limitations"), but nothing keeps consuming free-plan credit once destroyed.
 
 ## Prerequisites
 
@@ -60,6 +61,16 @@ Terraform creates three resources:
    terraform init
    terraform plan
    terraform apply
+   ```
+
+   On macOS, Linux or Git Bash the equivalent is:
+
+   ```
+   aws login --profile codemapper
+   eval "$(aws configure export-credentials --profile codemapper --format env)"
+   cd terraform
+   cp terraform.tfvars.example terraform.tfvars   # set my_ip_cidr to your public IP
+   terraform init && terraform plan && terraform apply
    ```
 
    The outputs include `public_ip` and a ready-made `ssh_command`.
@@ -112,7 +123,15 @@ The account is on the AWS Free plan, so usage is paid from credits and the accou
 unless I upgrade it. A `t3.micro` left running uses roughly $8 to $10 of credit a month. I destroy it
 when I am not using it.
 
-## What I would change for production
+## Known limitations
+
+This is a learning deployment, not a production one.
+
+- Deployment is manual: the app is cloned and started over SSH, and the `.env` file is written by hand
+- The analysed repository (`sample_repo/`) is not in git, so it has to be cloned on the server
+- Only one IP can reach the server, so the IP in `terraform.tfvars` must be updated if mine changes
+
+What I would change for production:
 
 - Managed Kubernetes (EKS) or ECS instead of a single VM, with the existing `k8s/` manifests
 - An Application Load Balancer with HTTPS (ACM certificate) instead of a raw IP on port 8000
